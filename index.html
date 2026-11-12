@@ -1,0 +1,781 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Move The Dot Toward The Box</title>
+  <style>
+    body { font-family: Arial, sans-serif; display:flex; flex-direction:column; align-items:center; gap:12px; padding:20px; }
+    #figure { border:1px solid #888; width:640px; padding:8px; display:flex; justify-content:center; }
+    #canvasContainer { background:#f7f7f7; padding:6px; }
+    canvas { background: #fff; display:block; }
+    #status { min-height:24px; }
+
+    /* points tracker, fixed to the top-left of the window */
+    #scoreBox {
+      position:fixed; top:12px; left:12px; z-index:5;
+      background:#fff; border:2px solid #333; border-radius:6px;
+      padding:8px 14px; min-width:110px;
+    }
+    #scoreLabel { font-size:13px; color:#555; }
+    #scoreValue { font-size:26px; font-weight:bold; }
+    #scoreDelta { font-size:14px; min-height:18px; color:#1a7f37; }
+
+    /* prediction panel */
+    #predictPanel { display:flex; flex-direction:column; align-items:center; gap:8px; visibility:hidden; }
+    #predictQuestion { font-size:16px; font-weight:bold; }
+    #predictOptions { display:flex; gap:10px; }
+    .predBtn {
+      border:2px solid #888; border-radius:6px; padding:6px 14px; font-size:15px;
+      background:#fff; cursor:pointer;
+    }
+    .predBtn.chosen { border-color:#1a5fb4; background:#e6efff; font-weight:bold; }
+
+    /* shared overlay look */
+    .overlay {
+      position:fixed; left:0; top:0; width:100%; height:100%; display:flex; z-index:10;
+      align-items:center; justify-content:center; background: rgba(0,0,0,0.35);
+      visibility:hidden;
+    }
+    .overlayBox {
+      background:white; padding:20px 24px; border-radius:8px; min-width:420px; max-width:560px; text-align:center;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    }
+    #sliderBar { margin-top:10px; display:flex; align-items:center; gap:12px; }
+    #sliderTrack { height:12px; background:#ddd; flex:1; position:relative; border-radius:6px; }
+    #sliderKnob {
+      width:18px; height:18px; border-radius:50%; background:#333; position:absolute; top:50%;
+      transform:translate(-50%,-50%);
+    }
+    .instructions { font-size:13px; color:#444; }
+    button { padding:6px 12px; }
+
+    /* consent */
+    #consentText { font-size:17px; line-height:1.5; }
+    .consentButtons { display:flex; justify-content:center; gap:16px; margin-top:16px; }
+    .consentButtons button { font-size:16px; padding:8px 20px; }
+
+    /* intro */
+    #introBox { text-align:left; font-size:15px; line-height:1.5; max-height:90vh; overflow-y:auto; }
+    #introBox h3 { margin-top:0; text-align:center; }
+    #introBox ul { margin:4px 0 8px; padding-left:22px; }
+    #introBox ul ul { margin:2px 0 4px; color:#444; }
+    #introContinue { text-align:center; font-weight:bold; margin-top:12px; }
+
+    /* end-of-experiment fallback */
+    #endBox { display:none; text-align:center; max-width:560px; }
+  </style>
+</head>
+<body>
+  <!-- Points tracker -->
+  <div id="scoreBox">
+    <div id="scoreLabel">Points</div>
+    <div id="scoreValue">0</div>
+    <div id="scoreDelta"></div>
+  </div>
+
+  <h2>Move The Dot Toward The Box</h2>
+  <div id="figure">
+    <div id="canvasContainer">
+      <!-- Canvas uses 600x400 box (pixels) but drawing uses normalized coords [0,1] -->
+      <canvas id="expCanvas" width="600" height="400"></canvas>
+    </div>
+  </div>
+
+  <div id="predictPanel">
+    <div id="predictQuestion">Will the dot go to the green square?</div>
+    <div id="predictOptions">
+      <button class="predBtn" data-pred="Y">Y = Yes</button>
+      <button class="predBtn" data-pred="N">N = No</button>
+      <button class="predBtn" data-pred="U">U = Unsure</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+  <div id="endBox">
+    <p id="endMsg"></p>
+    <button id="downloadBtn">Download my data file</button>
+  </div>
+
+  <!-- Consent overlay (shown first) -->
+  <div id="consentOverlay" class="overlay">
+    <div class="overlayBox">
+      <h3 style="margin-top:0;">AGREEMENT TO PARTICIPATE</h3>
+      <p id="consentText">Click on the "I Agree" button to confirm your agreement to take part in the research.</p>
+      <p id="consentText2" style="font-size:17px; line-height:1.5;">If you choose to participate, please complete the experiment in one session. Do not quit in the middle and restart.</p>
+      <div class="consentButtons">
+        <button id="consentAgree">I Agree</button>
+        <button id="consentDisagree">I Disagree</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Instruction overlay (shown after consent) -->
+  <div id="introOverlay" class="overlay">
+    <div class="overlayBox" id="introBox">
+      <h3>Instructions</h3>
+      <p>In this task, you will move a dot toward a green square using the arrow keys. On each trial, a green square appears on one side of the box. Press the arrow key that points toward it, and the dot will move.</p>
+      <p><b>Before each trial, you will make a prediction:</b> will the dot actually go to the green square when you press the key? You will get most points from correct prediction, and the least points from incorrect prediction.</p>
+      <ul>
+        <li>Press <b>Y</b> for <b>Yes</b>: I predict that the dot will go to the green square.
+          <ul><li>Correct prediction earns <b>10 points</b>. Incorrect prediction earns <b>0 points</b>.</li></ul>
+        </li>
+        <li>Press <b>N</b> for <b>No</b>: I predict that the dot will not go to the green square.
+          <ul><li>Correct prediction earns <b>10 points</b>. Incorrect prediction earns <b>0 points</b>.</li></ul>
+        </li>
+        <li>Press <b>U</b> for <b>Unsure</b>: I am not sure.
+          <ul><li>Earns <b>5 points</b>.</li></ul>
+        </li>
+      </ul>
+      <p>Your total score is shown in the top-left corner. After every 10 trials, you will be asked to rate how much control you felt.</p>
+      <p>The goal is to earn as many points as you can.</p>
+      <div id="introContinue">Press SPACE to begin.</div>
+    </div>
+  </div>
+
+  <!-- Rating overlay -->
+  <div id="ratingOverlay" class="overlay">
+    <div class="overlayBox">
+      <div id="ratingPrompt">To what extent did you feel in control during past 10 trials?<br>Press SPACE to confirm your response.</div>
+      <div id="sliderBar">
+        <div id="sliderTrack">
+          <div id="sliderKnob"></div>
+        </div>
+        <div id="sliderValue">You entered: 0.0</div>
+      </div>
+      <div style="margin-top:12px;">
+        <div class="instructions">Use LEFT/RIGHT arrow keys to change slider by 0.1. Press SPACE to confirm.</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/*
+  Agency Prediction — sense of agency + outcome prediction (20 blocks).
+  - Subject ID: Sona code from the link (?sona_id=...), else last 5 digits of Date.now(); RNG seeded from it.
+  - Error schedule: ascending (0..9) + descending (9..0); order counterbalanced by ID parity.
+  - Before each trial: predict Y / N / U. The prediction can be changed until the dot moves.
+    Correct = 10 points, Unsure = 5, Incorrect = 0. Rating after trial 10 of every block.
+  - Logging: rows are kept in localStorage and sent ONCE PER BLOCK (after the rating).
+    Each block is a batch with a unique batch_id; the server skips batch_ids it has already
+    written, so retries can never create duplicate rows. A batch only leaves the local queue
+    after the server confirms it.
+*/
+
+(() => {
+  // ---------- CONFIG ----------
+  const BOX_W = 600, BOX_H = 400;
+  const DOT_RADIUS_NORM = 0.02;
+  const SQUARE_SIZE_NORM = 0.06;
+  const ANIMATION_DURATION = 400;
+  const BLOCKS = 20;
+  const TRIALS_PER_BLOCK = 10;
+  const INTER_TRIAL_MS = 800;              // pause after each trial so the points change can be seen
+  const POINTS = { correct: 10, unsure: 5, wrong: 0 };
+
+  // Web app URL of the Apps Script attached to the Agency Prediction sheet
+  // (ends in /exec). See apps_script_prediction.gs.
+  const SHEET_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxIvLTHdbPotYojEbSWsdP9HVv2PFQNHXl2JwB6c8qBq16k6BCYGTZEoqxa1CENtS0CtQ/exec';
+  // Sona client-side completion URL, ending in "survey_code=" (delete the XXX Sona puts there).
+  // Leave '' to skip the redirect. Example:
+  // 'https://yourschool.sona-systems.com/webstudy_credit.aspx?experiment_id=123&credit_token=abc123&survey_code='
+  const SONA_COMPLETION_URL = '';
+  // Different prefix from Experiment 2, so leftover Experiment 2 data in the same
+  // browser is never sent to this experiment's sheet.
+  const STORAGE_PREFIX = 'agency_predict_';
+  const MAX_SEND_ATTEMPTS = 5;             // per flush; backoff 1s, 2s, 4s, 8s
+  const COLUMNS = ['Timestamp','Subject_ID','Block','Trial','Expected_Direction','Response_Key',
+                   'Error_Occurred','Key_Presses','Rating','Rating_initial','Block_error','RT',
+                   'Selection','Utility_change','Current_utility','Movement_RT'];
+  // RT          = green square onset -> end of trial (includes prediction time)
+  // Movement_RT = last Y/N/U press  -> the arrow press that moved the dot
+
+  // ---------- SUBJECT / RNG ----------
+  const now = Date.now().toString();
+  // Use the Sona code from the link (?sona_id=%SURVEY_CODE%) when there is one;
+  // otherwise (e.g. testing without Sona) generate a random ID.
+  // Only digits are accepted, so an unfilled "%SURVEY_CODE%" placeholder falls back to random.
+  const urlParams = new URLSearchParams(window.location.search);
+  const sonaRaw = (urlParams.get('sona_id') || urlParams.get('survey_code') || '').trim();
+  const sona_id = /^\d+$/.test(sonaRaw) ? sonaRaw : '';
+  const subject_id = sona_id || now.slice(-5);
+  function mulberry32(a) {
+    return function() {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
+  const seedInt = parseInt(subject_id,10) || 1;
+  const rnd = mulberry32(seedInt);
+  function rInt(min, max) { return Math.floor(rnd()*(max-min+1))+min; }
+
+  // ---------- Canvas ----------
+  const canvas = document.getElementById('expCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = BOX_W; canvas.height = BOX_H;
+  function toPixelX(nx){ return nx * BOX_W; }
+  function toPixelY(ny){ return ny * BOX_H; }
+  function clearCanvas(){ ctx.clearRect(0,0,BOX_W,BOX_H); }
+
+  // ---------- UI elements ----------
+  const status = document.getElementById('status');
+  const consentOverlay = document.getElementById('consentOverlay');
+  const introOverlay = document.getElementById('introOverlay');
+  const ratingOverlay = document.getElementById('ratingOverlay');
+  const sliderTrack = document.getElementById('sliderTrack');
+  const sliderKnob = document.getElementById('sliderKnob');
+  const sliderValue = document.getElementById('sliderValue');
+  const predictPanel = document.getElementById('predictPanel');
+  const predButtons = Array.from(document.querySelectorAll('.predBtn'));
+  const scoreValue = document.getElementById('scoreValue');
+  const scoreDelta = document.getElementById('scoreDelta');
+  const endBox = document.getElementById('endBox');
+  const endMsg = document.getElementById('endMsg');
+  const downloadBtn = document.getElementById('downloadBtn');
+
+  // ---------- Experiment state ----------
+  let blockIndex = 0;
+  let trialIndex = 0;
+  let errorTrialPositions = [];
+  let phase = 'idle';            // 'idle' | 'predict' | 'move'
+  let dotPos = {x:0.5, y:0.5};
+  let greenDirection = null;
+  let expectedDirection = null;
+  let keyPressCount = 0;
+  let trialStartTime = 0;
+  let selection = null;          // 'Y' | 'N' | 'U'
+  let selectionTime = 0;         // time of the most recent Y/N/U press
+  let score = 0;
+
+  // rows for the block in progress (sent together once the block is complete)
+  let blockRows = [];
+
+  // ---------- Block error schedule: 20 blocks ----------
+  const ascending  = Array.from({length:10}, (_,i)=>i);      // [0..9]
+  const descending = Array.from({length:10}, (_,i)=>9 - i);  // [9..0]
+  let blocksErrorValues;
+  if (subject_id % 2 === 1) {
+    blocksErrorValues = [...ascending, ...descending];   // odd ID
+  } else {
+    blocksErrorValues = [...descending, ...ascending];   // even ID
+  }
+
+  // ======================================================================
+  //  LOGGING: localStorage queue + one POST per block + server-side dedupe
+  // ======================================================================
+  const QUEUE_KEY = STORAGE_PREFIX + 'queue_' + subject_id;  // unsent batches
+  const ALL_KEY   = STORAGE_PREFIX + 'all_' + subject_id;    // every row, for the backup file
+
+  function lsGet(key, fallback) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch(e) { return fallback; }
+  }
+  function lsSet(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch(e) { console.warn('localStorage unavailable', e); return false; }
+  }
+
+  // in-memory mirrors, used if localStorage is blocked
+  let memQueue = lsGet(QUEUE_KEY, []);
+  let memAll = lsGet(ALL_KEY, []);
+
+  function getQueue() { return memQueue; }
+  function setQueue(q) { memQueue = q; lsSet(QUEUE_KEY, q); }
+
+  function enqueueBlock(blockNumber, rows) {
+    const batch = {
+      batch_id: subject_id + '_' + now + '_b' + blockNumber,  // unique per subject + session + block
+      subject_id,
+      block: blockNumber,
+      rows
+    };
+    setQueue([...getQueue(), batch]);
+    memAll = [...memAll, ...rows];
+    lsSet(ALL_KEY, memAll);
+  }
+
+  // Send a list of batches. Resolves with the batch_ids the server confirmed.
+  async function postBatches(batches) {
+    const resp = await fetch(SHEET_ENDPOINT, {
+      method: 'POST',
+      // text/plain is a "simple" request: no CORS preflight, and Apps Script can still return a readable reply
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({batches})
+    });
+    const data = await resp.json();
+    if (data.status !== 'ok' || !Array.isArray(data.acked)) {
+      throw new Error('Server error: ' + JSON.stringify(data));
+    }
+    return data.acked;
+  }
+
+  let flushing = null;  // prevents two flushes running at once
+  function flushQueue() {
+    if (flushing) return flushing;
+    flushing = (async () => {
+      for (let attempt = 0; attempt < MAX_SEND_ATTEMPTS; attempt++) {
+        const pending = getQueue();
+        if (pending.length === 0) return true;
+        try {
+          const acked = await postBatches(pending);
+          setQueue(getQueue().filter(b => !acked.includes(b.batch_id)));
+          if (getQueue().length === 0) return true;
+        } catch(err) {
+          console.warn(`Send attempt ${attempt+1} failed`, err);
+        }
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      }
+      return getQueue().length === 0;
+    })().finally(() => { flushing = null; });
+    return flushing;
+  }
+
+  // Last-chance send if the tab is closed mid-experiment. The server dedupes, so a
+  // beacon that duplicates an in-flight fetch is harmless.
+  window.addEventListener('pagehide', () => {
+    const pending = getQueue();
+    if (pending.length && navigator.sendBeacon) {
+      const blob = new Blob([JSON.stringify({batches: pending})], {type: 'text/plain;charset=utf-8'});
+      navigator.sendBeacon(SHEET_ENDPOINT, blob);
+    }
+  });
+
+  // On load, send anything left behind by an earlier session of THIS experiment on this browser.
+  function flushLeftoversFromEarlierSessions() {
+    try {
+      const leftovers = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(STORAGE_PREFIX + 'queue_') && k !== QUEUE_KEY) {
+          leftovers.push(k);
+        }
+      }
+      leftovers.forEach(async (k) => {
+        const q = lsGet(k, []);
+        if (!q.length) { localStorage.removeItem(k); return; }
+        try {
+          const acked = await postBatches(q);
+          const rest = q.filter(b => !acked.includes(b.batch_id));
+          if (rest.length) lsSet(k, rest); else localStorage.removeItem(k);
+        } catch(e) { /* try again on a future visit */ }
+      });
+    } catch(e) { /* localStorage blocked */ }
+  }
+
+  function downloadData() {
+    const header = COLUMNS.join(',');
+    const lines = memAll.map(r => COLUMNS.map(c => {
+      const v = r[c] === undefined ? '' : String(r[c]);
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+    }).join(','));
+    const blob = new Blob([header + '\n' + lines.join('\n')], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `agency_prediction_${subject_id}.csv`;
+    a.click();
+  }
+  downloadBtn.addEventListener('click', downloadData);
+
+  // ---------- Beep ----------
+  function beep(duration=120, freq=800, volume=0.05) {
+    try {
+      const actx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.connect(g); g.connect(actx.destination);
+      g.gain.value = volume;
+      o.type = 'sine';
+      o.frequency.value = freq;
+      o.start(0);
+      setTimeout(()=> { o.stop(); actx.close(); }, duration);
+    } catch(e){ }
+  }
+
+  // ---------- Geometry / drawing ----------
+  function pickDirection() {
+    const idx = rInt(0,3);
+    return ['up','down','left','right'][idx];
+  }
+  function directionToPosition(dir) {
+    const center = {x:0.5,y:0.5};
+    const margin = 0.3;
+    if(dir === 'up') return {x:center.x, y: center.y - margin};
+    if(dir === 'down') return {x:center.x, y: center.y + margin};
+    if(dir === 'left') return {x:center.x - margin, y: center.y};
+    if(dir === 'right') return {x:center.x + margin, y: center.y};
+    return center;
+  }
+  function drawDot(nx, ny) {
+    const px = toPixelX(nx), py = toPixelY(ny);
+    ctx.beginPath();
+    ctx.fillStyle = 'black';
+    ctx.arc(px, py, DOT_RADIUS_NORM * BOX_W, 0, Math.PI*2);
+    ctx.fill();
+  }
+  function drawGreenSquare(dir) {
+    const pos = directionToPosition(dir);
+    const sizePx = SQUARE_SIZE_NORM * BOX_W;
+    const px = toPixelX(pos.x) - sizePx/2;
+    const py = toPixelY(pos.y) - (SQUARE_SIZE_NORM*BOX_H)/2;
+    ctx.fillStyle = 'green';
+    ctx.fillRect(px, py, sizePx, SQUARE_SIZE_NORM * BOX_H);
+  }
+  function renderScene(dotX, dotY, greenDir) {
+    clearCanvas();
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, BOX_W-1, BOX_H-1);
+    if(greenDir) drawGreenSquare(greenDir);
+    drawDot(dotX, dotY);
+  }
+  function animateDotTo(targetNx, targetNy, durationMs, onComplete) {
+    const startX = dotPos.x, startY = dotPos.y;
+    const t0 = performance.now();
+    function step(nowT) {
+      const t = Math.min(1, (nowT - t0) / durationMs);
+      const ease = t<0.5 ? 2*t*t : -1 + (4-2*t)*t;
+      dotPos.x = startX + (targetNx - startX)*ease;
+      dotPos.y = startY + (targetNy - startY)*ease;
+      renderScene(dotPos.x, dotPos.y, greenDirection);
+      if(t < 1) requestAnimationFrame(step);
+      else {
+        dotPos.x = targetNx; dotPos.y = targetNy;
+        renderScene(dotPos.x, dotPos.y, greenDirection);
+        if(onComplete) onComplete();
+      }
+    }
+    requestAnimationFrame(step);
+  }
+  function flashColor(color, duration = 150) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(0,0,BOX_W,BOX_H);
+    ctx.restore();
+    setTimeout(() => renderScene(dotPos.x, dotPos.y, null), duration);
+  }
+
+  // ---------- Prediction + points ----------
+  function keyToSelection(key) {
+    const k = key.toLowerCase();
+    if(k === 'y') return 'Y';
+    if(k === 'n') return 'N';
+    if(k === 'u') return 'U';
+    return null;
+  }
+  // The prediction can be changed any number of times until the dot starts moving.
+  function choosePrediction(s) {
+    if(phase !== 'predict' && phase !== 'move') return;
+    selection = s;
+    selectionTime = performance.now();
+    predButtons.forEach(b => b.classList.toggle('chosen', b.dataset.pred === s));
+    phase = 'move';
+    status.innerText = idPrefix() + `Block ${blockIndex+1}, Trial ${trialIndex+1}: Press the arrow key toward the green square. `
+      + `(You can still change your prediction until the dot moves.)`;
+  }
+  function lockPrediction(locked) {
+    predictPanel.style.opacity = locked ? '0.5' : '1';
+    predButtons.forEach(b => b.disabled = locked);
+  }
+  predButtons.forEach(b => b.addEventListener('click', () => {
+    b.blur();   // so a later SPACE press doesn't re-click the button
+    choosePrediction(b.dataset.pred);
+  }));
+
+  function pointsFor(dotReachedTarget) {
+    if(selection === 'U') return POINTS.unsure;
+    return (selection === 'Y') === dotReachedTarget ? POINTS.correct : POINTS.wrong;
+  }
+  function showPoints(pts) {
+    scoreValue.innerText = score;
+    scoreDelta.style.color = pts > 0 ? '#1a7f37' : '#888';
+    scoreDelta.innerText = `+${pts}`;
+  }
+
+  // ---------- Trial flow ----------
+  function startBlock(bidx) {
+    blockIndex = bidx;
+    trialIndex = 0;
+    blockRows = [];
+    errorTrialPositions = [];
+    const allIdx = Array.from({length:TRIALS_PER_BLOCK}, (_,i)=>i);
+    for(let k=0; k<blocksErrorValues[bidx]; k++){
+      const i = rInt(0, allIdx.length-1);
+      errorTrialPositions.push(allIdx.splice(i,1)[0]);
+    }
+    status.innerText = `Let's Go!!!`;
+    setTimeout(()=> startTrial(), 400);
+  }
+
+  function startTrial() {
+    trialStartTime = performance.now();
+    keyPressCount = 0;
+    selection = null;
+    dotPos = {x:0.5, y:0.5};
+    greenDirection = pickDirection();
+    expectedDirection = greenDirection;
+    renderScene(dotPos.x, dotPos.y, greenDirection);
+    scoreDelta.innerText = '';
+    predButtons.forEach(b => b.classList.remove('chosen'));
+    lockPrediction(false);
+    predictPanel.style.visibility = 'visible';
+    phase = 'predict';
+    status.innerText = idPrefix() + `Block ${blockIndex+1}, Trial ${trialIndex+1}: Make your prediction (Y / N / U).`;
+  }
+
+  // Participant ID is shown only during the first trial of the first block.
+  function idPrefix() {
+    return (blockIndex === 0 && trialIndex === 0) ? `Subject ID: ${subject_id}. ` : '';
+  }
+
+  function endTrial(data) {
+    const rt = performance.now() - trialStartTime;
+    phase = 'idle';
+
+    const pts = pointsFor(!data.error_occurred);
+    score += pts;
+    showPoints(pts);
+
+    // Rating and Rating_initial are filled on trial 10 after the rating; trials 1–9 keep 0.
+    blockRows.push({
+      Timestamp: new Date().toISOString(),
+      Subject_ID: subject_id,
+      Block: blockIndex+1,
+      Trial: trialIndex+1,
+      Expected_Direction: data.expected_direction,
+      Response_Key: data.response_key,
+      Error_Occurred: data.error_occurred,
+      Key_Presses: data.key_presses,
+      Rating: 0,
+      Rating_initial: 0,
+      Block_error: blocksErrorValues[blockIndex],
+      RT: rt.toFixed(2),
+      Selection: selection,
+      Utility_change: pts,
+      Current_utility: score,
+      Movement_RT: data.movement_rt.toFixed(2)
+    });
+
+    greenDirection = null;
+    renderScene(dotPos.x, dotPos.y, null);
+    trialIndex++;
+
+    if(trialIndex >= TRIALS_PER_BLOCK) {
+      setTimeout(runEndOfBlock, INTER_TRIAL_MS);
+    } else {
+      setTimeout(()=> startTrial(), INTER_TRIAL_MS);
+    }
+  }
+
+  function runEndOfBlock() {
+    predictPanel.style.visibility = 'hidden';
+    showRatingOverlay().then(({rating, initial}) => {
+      // fill block-level fields on trial 10, then queue and send the whole block
+      const last = blockRows[blockRows.length - 1];
+      last.Rating = rating;
+      last.Rating_initial = initial;
+
+      enqueueBlock(blockIndex+1, blockRows);
+      flushQueue();  // runs in the background; the next block starts right away
+
+      if(blockIndex+1 < BLOCKS) {
+        startBlock(blockIndex+1);
+      } else {
+        finishExperiment();
+      }
+    });
+  }
+
+  async function finishExperiment() {
+    predictPanel.style.visibility = 'hidden';
+    status.innerText = `Your final score: ${score} points. Saving your data. Please keep this page open…`;
+    const ok = await flushQueue();
+    if(ok) {
+      if(SONA_COMPLETION_URL && sona_id) {
+        // all data is confirmed saved: send the participant back to Sona for credit
+        status.innerText = `Experiment finished. Your final score: ${score} points. Thank you! Returning you to Sona…`;
+        setTimeout(() => {
+          window.location.href = SONA_COMPLETION_URL + encodeURIComponent(sona_id);
+        }, 2000);
+      } else {
+        status.innerText = `Experiment finished. Your final score: ${score} points. Thank you!`;
+        alert(`Experiment finished. Your final score: ${score} points. Thank you!`);
+      }
+    } else {
+      status.innerText = '';
+      endMsg.innerText = 'The experiment is finished, but some of your data could not be uploaded. '
+        + 'Please download your data file and send it to the researcher. Subject ID: ' + subject_id;
+      endBox.style.display = 'block';
+    }
+  }
+
+  // ---------- Key handling ----------
+  function keyToDir(key) {
+    if(key === 'ArrowUp') return 'up';
+    if(key === 'ArrowDown') return 'down';
+    if(key === 'ArrowLeft') return 'left';
+    if(key === 'ArrowRight') return 'right';
+    return null;
+  }
+
+  window.addEventListener('keydown', (ev) => {
+    // overlays: swallow keys so stray presses don't leak into trials
+    // (the intro and rating overlays handle their own keys)
+    if(consentOverlay.style.visibility === 'visible') { ev.preventDefault(); return; }
+    if(introOverlay.style.visibility === 'visible') return;
+    if(ratingOverlay.style.visibility === 'visible') { ev.preventDefault(); return; }
+
+    // prediction keys work in both phases, until the dot moves
+    if(phase === 'predict' || phase === 'move') {
+      const s = keyToSelection(ev.key);
+      if(s) { ev.preventDefault(); choosePrediction(s); return; }
+    }
+
+    const dir = keyToDir(ev.key);
+    if(phase === 'predict') {
+      if(dir) {
+        ev.preventDefault();
+        status.innerText = 'Please make your prediction first: Y = Yes, N = No, U = Unsure.';
+      }
+      return;
+    }
+    if(phase !== 'move' || !dir) return;
+
+    ev.preventDefault();
+    keyPressCount++;
+    if(dir !== expectedDirection) {
+      beep(100, 600);
+      status.innerText = `Wrong direction. Try again. Key presses: ${keyPressCount}`;
+      return;
+    }
+
+    const movementRT = performance.now() - selectionTime;
+    phase = 'idle';   // prediction is now final; ignore further keys while the dot moves
+    lockPrediction(true);
+    const isErrorTrial = errorTrialPositions.includes(trialIndex);
+    if(isErrorTrial) {
+      const opposite = {up:'down', down:'up', left:'right', right:'left'}[dir];
+      const target = directionToPosition(opposite);
+      animateDotTo(target.x, target.y, ANIMATION_DURATION, () => {
+        flashColor('red');
+        setTimeout(() => {
+          endTrial({
+            expected_direction: expectedDirection,
+            response_key: dir,
+            error_occurred: true,
+            key_presses: keyPressCount,
+            movement_rt: movementRT
+          });
+        }, 150);
+      });
+    } else {
+      const target = directionToPosition(dir);
+      animateDotTo(target.x, target.y, ANIMATION_DURATION, () => {
+        flashColor('green');
+        setTimeout(() => {
+          endTrial({
+            expected_direction: expectedDirection,
+            response_key: dir,
+            error_occurred: false,
+            key_presses: keyPressCount,
+            movement_rt: movementRT
+          });
+        }, 150);
+      });
+    }
+  });
+
+  // ---------- Rating overlay (also returns the start value) ----------
+  function showRatingOverlay() {
+    return new Promise((resolve) => {
+      const possible = Array.from({length:9}, (_,i)=> (i+1)/10 );  // [0.1 .. 0.9]
+      const startIdx = rInt(0, possible.length - 1);
+      const initial = possible[startIdx];
+      let currentValue = initial;
+
+      function updateKnob() {
+        const trackW = sliderTrack.clientWidth;
+        sliderKnob.style.left = `${currentValue * trackW}px`;
+        sliderValue.innerText = `You entered: ${currentValue.toFixed(1)}`;
+      }
+
+      function onKey(ev) {
+        if(ev.key === 'ArrowLeft') {
+          ev.preventDefault();
+          currentValue = Math.max(0, +(currentValue - 0.1).toFixed(1));
+          updateKnob();
+        } else if(ev.key === 'ArrowRight') {
+          ev.preventDefault();
+          currentValue = Math.min(1, +(currentValue + 0.1).toFixed(1));
+          updateKnob();
+        } else if(ev.key === ' ' || ev.code === 'Space') {
+          ev.preventDefault();
+          cleanup();
+          resolve({ rating: currentValue, initial });
+        }
+      }
+
+      function cleanup() {
+        ratingOverlay.style.visibility = 'hidden';
+        window.removeEventListener('keydown', onKey);
+      }
+
+      ratingOverlay.style.visibility = 'visible';
+      status.innerText = 'Rate how in control you felt.';
+      setTimeout(()=> { updateKnob(); }, 0);
+      window.addEventListener('keydown', onKey);
+    });
+  }
+
+  // ---------- Initialization ----------
+  renderScene(dotPos.x, dotPos.y, null);
+  flushLeftoversFromEarlierSessions();
+
+  // 0) consent pop-up. Nothing else (instructions, trials, logging) starts until "I Agree".
+  consentOverlay.style.visibility = 'visible';
+  status.innerText = '';
+
+  document.getElementById('consentAgree').addEventListener('click', (ev) => {
+    ev.currentTarget.blur();   // so a later SPACE press doesn't re-click the button
+    consentOverlay.style.visibility = 'hidden';
+    showIntro();
+  });
+
+  document.getElementById('consentDisagree').addEventListener('click', () => {
+    consentOverlay.style.visibility = 'hidden';
+    // Browsers only let a page close a tab that a script opened, so try to close,
+    // and if that's blocked, replace the page with a closing message.
+    window.close();
+    setTimeout(() => {
+      document.body.innerHTML =
+        '<div style="max-width:520px;margin:80px auto;text-align:center;font-family:Arial,sans-serif;font-size:18px;line-height:1.5;">'
+        + '<p>You have chosen not to participate. No data has been collected.</p>'
+        + '<p>You may now close this window.</p></div>';
+    }, 100);
+  });
+
+  // 1) instruction pop-up, closed with SPACE, which starts block 1
+  function showIntro() {
+    introOverlay.style.visibility = 'visible';
+    window.addEventListener('keydown', closeIntro);
+  }
+  function closeIntro(ev) {
+    if(ev.key !== ' ' && ev.code !== 'Space') { if(keyToDir(ev.key)) ev.preventDefault(); return; }
+    ev.preventDefault();
+    window.removeEventListener('keydown', closeIntro);
+    introOverlay.style.visibility = 'hidden';
+    startBlock(0);
+  }
+
+  window.__exp_debug = {
+    subject_id, seedInt, blocksErrorValues,
+    get queue(){ return getQueue(); },
+    get allRows(){ return memAll; },
+    get score(){ return score; },
+    download: downloadData
+  };
+})();
+</script>
+</body>
+</html>
